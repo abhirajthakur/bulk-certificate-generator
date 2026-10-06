@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    redis_url: str
+
 
 
 settings = Settings()  # pyright: ignore[reportCallIssue]

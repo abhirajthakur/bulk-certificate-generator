@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -12,6 +13,9 @@ from .schemas import (
     JobStatusResponse,
     RecipientStatusResponse,
 )
+from .tasks import process_job
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Bulk Certificate Generator",
@@ -64,6 +68,13 @@ def create_job(
         db.add_all(recipients)
         db.commit()
         db.refresh(job)
+        try:
+            process_job.delay(str(job.id))
+        except Exception:
+            logger.exception(
+                "Failed to enqueue certificate job %s",
+                job.id,
+            )
 
     except Exception:
         db.rollback()
