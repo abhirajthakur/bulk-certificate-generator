@@ -3,14 +3,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from .celery_app import celery_app
-from .certificates import generate_certificate
-from .database import SessionLocal
-from .models import GenerationJob, JobRecipient
+from ..database import SessionLocal
+from ..models import GenerationJob, JobRecipient
+from .certificate_service import generate_certificate
 
 logger = logging.getLogger(__name__)
 
-STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "certificates"
+STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage" / "certificates"
 
 TERMINAL_JOB_STATUSES = {
     "completed",
@@ -19,18 +18,7 @@ TERMINAL_JOB_STATUSES = {
 }
 
 
-@celery_app.task(name="bulk_certificate_generator.ping")
-def ping() -> str:
-    """Verify that the Celery worker can execute a task."""
-    return "pong"
-
-
-@celery_app.task(
-    bind=True,
-    name="bulk_certificate_generator.process_job",
-    max_retries=3,
-)
-def process_job(self, job_id: str) -> dict[str, str | int]:
+def process_job(job_id: str) -> dict[str, str | int]:
     """Generate certificates and persist individual recipient outcomes."""
     try:
         parsed_job_id = UUID(job_id)
@@ -38,7 +26,6 @@ def process_job(self, job_id: str) -> dict[str, str | int]:
         logger.error("Invalid job ID received: %s", job_id)
         raise
 
-    # Claim the job before processing its recipients.
     with SessionLocal() as db:
         job = db.get(GenerationJob, parsed_job_id)
 
@@ -58,13 +45,14 @@ def process_job(self, job_id: str) -> dict[str, str | int]:
         job.started_at = datetime.now(UTC)
         db.commit()
 
-    # Process each recipient independently.
     with SessionLocal() as db:
         recipient_ids = [
-            recipient.id
-            for recipient in db.query(JobRecipient.id)
-            .filter(JobRecipient.job_id == parsed_job_id)
-            .all()
+            recipient_id
+            for (recipient_id,) in (
+                db.query(JobRecipient.id)
+                .filter(JobRecipient.job_id == parsed_job_id)
+                .all()
+            )
         ]
 
     for recipient_id in recipient_ids:
@@ -131,7 +119,6 @@ def process_job(self, job_id: str) -> dict[str, str | int]:
                     recipient.completed_at = datetime.now(UTC)
                     db.commit()
 
-    # Recalculate final counts from persisted recipient records.
     with SessionLocal() as db:
         job = db.get(GenerationJob, parsed_job_id)
         if job is None:

@@ -19,9 +19,9 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 # target_metadata = None
-from bulk_certificate_generator.config import settings
-from bulk_certificate_generator.database import Base
-from bulk_certificate_generator import models  # noqa: F401
+from bulk_certificate_generator.core.config import settings
+from bulk_certificate_generator.db.session import Base
+from bulk_certificate_generator.db import models  # noqa: F401
 
 target_metadata = Base.metadata
 

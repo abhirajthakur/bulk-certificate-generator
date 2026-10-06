@@ -1,12 +1,12 @@
 from celery import Celery
 
-from .config import settings
+from ..core.config import settings
 
 celery_app = Celery(
     "bulk_certificate_generator",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["bulk_certificate_generator.tasks"],
+    include=["bulk_certificate_generator.workers.tasks"],
 )
 
 celery_app.conf.update(

@@ -12,5 +12,4 @@ class Settings(BaseSettings):
     redis_url: str
 
 
-
 settings = Settings()  # pyright: ignore[reportCallIssue]
