@@ -1,9 +1,12 @@
 import logging
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from .celery_app import celery_app
 from .database import get_db
 from .models import GenerationJob, JobRecipient
 from .schemas import (
@@ -13,9 +16,12 @@ from .schemas import (
     JobStatusResponse,
     RecipientStatusResponse,
 )
-from .tasks import process_job
 
 logger = logging.getLogger(__name__)
+
+CERTIFICATE_STORAGE_DIR = (
+    Path(__file__).resolve().parents[2] / "storage" / "certificates"
+)
 
 app = FastAPI(
     title="Bulk Certificate Generator",
@@ -69,7 +75,10 @@ def create_job(
         db.commit()
         db.refresh(job)
         try:
-            process_job.delay(str(job.id))
+            celery_app.send_task(
+                "bulk_certificate_generator.process_job",
+                args=[str(job.id)],
+            )
         except Exception:
             logger.exception(
                 "Failed to enqueue certificate job %s",
@@ -160,4 +169,55 @@ def get_job_recipients(
         job_id=job.id,
         total_count=len(recipients),
         recipients=recipients,
+    )
+
+
+@app.get(
+    "/api/v1/certificates/{certificate_id}",
+    response_class=FileResponse,
+    tags=["Certificates"],
+)
+def download_certificate(
+    certificate_id: UUID,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Download a successfully generated certificate PDF."""
+    recipient = db.get(JobRecipient, certificate_id)
+
+    if recipient is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Certificate not found",
+        )
+
+    if recipient.status != "completed" or not recipient.certificate_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Certificate is not available",
+        )
+
+    storage_root = CERTIFICATE_STORAGE_DIR.resolve()
+    certificate_path = Path(recipient.certificate_path).resolve()
+
+    # Ensure the database path points inside the certificate storage directory.
+    if not certificate_path.is_relative_to(storage_root):
+        logger.error(
+            "Certificate path for recipient %s is outside storage",
+            certificate_id,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail="Certificate file not found",
+        )
+
+    if not certificate_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Certificate file not found",
+        )
+
+    return FileResponse(
+        path=certificate_path,
+        media_type="application/pdf",
+        filename=f"certificate-{recipient.id}.pdf",
     )
