@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from ..database import SessionLocal
-from ..models import GenerationJob, JobRecipient
+from ..db.models import GenerationJob, JobRecipient
+from ..db.session import SessionLocal
 from .certificate_service import generate_certificate
 
 logger = logging.getLogger(__name__)
