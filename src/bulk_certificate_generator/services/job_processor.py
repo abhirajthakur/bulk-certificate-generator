@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy.exc import OperationalError
+
 from ..db.models import GenerationJob, JobRecipient
 from ..db.session import SessionLocal
 from .certificate_service import generate_certificate
@@ -18,7 +20,11 @@ TERMINAL_JOB_STATUSES = {
 }
 
 
-def process_job(job_id: str) -> dict[str, str | int]:
+def process_job(
+    job_id: str,
+    *,
+    resume_processing: bool = False,
+) -> dict[str, str | int]:
     """Generate certificates and persist individual recipient outcomes."""
     try:
         parsed_job_id = UUID(job_id)
@@ -37,12 +43,13 @@ def process_job(job_id: str) -> dict[str, str | int]:
             logger.info("Job %s is already finished.", job_id)
             return {"job_id": job_id, "result": "already_finished"}
 
-        if job.status == "processing":
+        if job.status == "processing" and not resume_processing:
             logger.warning("Job %s is already processing.", job_id)
             return {"job_id": job_id, "result": "already_processing"}
 
         job.status = "processing"
-        job.started_at = datetime.now(UTC)
+        if job.started_at is None:
+            job.started_at = datetime.now(UTC)
         db.commit()
 
     with SessionLocal() as db:
@@ -104,6 +111,13 @@ def process_job(job_id: str) -> dict[str, str | int]:
                 recipient_name,
                 recipient_email,
             )
+
+        except OperationalError:
+            logger.exception(
+                "Transient database error while processing recipient %s",
+                recipient_id,
+            )
+            raise
 
         except Exception as exc:
             logger.exception(

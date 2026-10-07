@@ -225,3 +225,40 @@ def test_process_job_skips_jobs_that_are_not_queued(
         job = session.get(GenerationJob, job_id)
         assert job is not None
         assert job.status == initial_status
+
+
+def test_process_job_resumes_processing_job(
+    worker_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        job_processor,
+        "generate_certificate",
+        fake_generate_certificate,
+    )
+    job_id, recipient_ids = seed_job(
+        worker_db,
+        [("Ada Lovelace", "ada@example.com")],
+    )
+
+    with worker_db() as session:
+        job = session.get(GenerationJob, job_id)
+        assert job is not None
+        job.status = "processing"
+        session.commit()
+
+    result = job_processor.process_job(
+        str(job_id),
+        resume_processing=True,
+    )
+
+    assert result["result"] == "completed"
+    assert result["success_count"] == 1
+
+    with worker_db() as session:
+        job = session.get(GenerationJob, job_id)
+        recipient = session.get(JobRecipient, recipient_ids[0])
+        assert job is not None
+        assert job.status == "completed"
+        assert recipient is not None
+        assert recipient.status == "completed"
